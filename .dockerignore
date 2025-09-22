@@ -1,0 +1,52 @@
+# Node modules
+node_modules
+npm-debug.log*
+
+# Build outputs
+dist
+
+# Development files
+*.log
+.env.local
+.env.development
+.env.test
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Testing
+coverage
+*.test.ts
+*.spec.ts
+
+# Temporary files
+tmp
+temp
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+
+# Lock files are needed for reproducible builds
+# bun.lock
