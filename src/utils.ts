@@ -228,6 +228,22 @@ export function setParameterValue(
     ]
   }
 
+  if ((!item.typeInfo?.name && !item.typeInfo?.type)) {
+    if (!Number.isNaN(item.value)) {
+      if (Number.isInteger(item.value)) {
+        param.valueInteger = item.value
+      } else {
+        param.valueDecimal = item.value
+      }
+      return
+    }
+
+    if (typeof item.value === 'string') {
+      param.valueString = item.value;
+      return
+    }
+  }
+
   switch (dataType.toLowerCase()) {
     // Complex types
     case 'humanname':
@@ -326,61 +342,61 @@ export function setParameterValue(
     // Primitive types
     case 'string':
     case 'system.string':
-      param.valueString = item.value || item;
+      param.valueString = item.value;
       break;
     case 'boolean':
-      param.valueBoolean = Boolean(item.value || item);
+      param.valueBoolean = Boolean(item.value);
       break;
     case 'integer':
-      param.valueInteger = parseInt(item.value || item);
+      param.valueInteger = parseInt(item.value);
       break;
     case 'decimal':
-      param.valueDecimal = parseFloat(item.value || item);
+      param.valueDecimal = parseFloat(item.value);
       break;
     case 'date':
-      param.valueDate = item.value || item;
+      param.valueDate = item.value;
       break;
     case 'datetime':
-      param.valueDateTime = item.value || item;
+      param.valueDateTime = item.value;
       break;
     case 'time':
-      param.valueTime = item.value || item;
+      param.valueTime = item.value;
       break;
     case 'instant':
-      param.valueInstant = item.value || item;
+      param.valueInstant = item.value;
       break;
     case 'code':
-      param.valueCode = item.value || item;
+      param.valueCode = item.value;
       break;
     case 'base64binary':
-      param.valueBase64Binary = item.value || item;
+      param.valueBase64Binary = item.value;
       break;
     case 'canonical':
-      param.valueCanonical = item.value || item;
+      param.valueCanonical = item.value;
       break;
     case 'id':
-      param.valueId = item.value || item;
+      param.valueId = item.value;
       break;
     case 'markdown':
-      param.valueMarkdown = item.value || item;
+      param.valueMarkdown = item.value;
       break;
     case 'oid':
-      param.valueOid = item.value || item;
+      param.valueOid = item.value;
       break;
     case 'positiveint':
-      param.valuePositiveInt = parseInt(item.value || item);
+      param.valuePositiveInt = parseInt(item.value);
       break;
     case 'unsignedint':
-      param.valueUnsignedInt = parseInt(item.value || item);
+      param.valueUnsignedInt = parseInt(item.value);
       break;
     case 'uri':
-      param.valueUri = item.value || item;
+      param.valueUri = item.value;
       break;
     case 'url':
-      param.valueUrl = item.value || item;
+      param.valueUrl = item.value;
       break;
     case 'uuid':
-      param.valueUuid = item.value || item;
+      param.valueUuid = item.value;
       break;
 
     default:
@@ -389,7 +405,7 @@ export function setParameterValue(
         param.extension = param.extension || [];
         param.extension.push({
           url: 'http://fhir.forms-lab.com/StructureDefinition/json-value',
-          valueString: JSON.stringify(item.value || item, null, 2)
+          valueString: JSON.stringify(item.value, null, 2)
         });
       } else if (resourcePath) {
         param.name = 'resource-path';

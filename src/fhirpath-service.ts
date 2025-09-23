@@ -66,7 +66,7 @@ export class FHIRPathService {
         const contextResult = await evaluate(params.context as string, {
           input: params.resource,
           variables: this.extractVariables(params.variables),
-          modelProvider
+          modelProvider,
         });
         // Use the context evaluation result as input, or fall back to resource if context is empty
         evaluationInput = contextResult && contextResult.length > 0 ? contextResult[0] : params.resource;
@@ -82,7 +82,6 @@ export class FHIRPathService {
 
       // Evaluate the FHIRPath expression
       const result = await evaluate(params.expression as string, evaluationOptions);
-
       // Analyze the expression for AST
       const analysisResult = await analyze(params.expression as string, {
         variables: evaluationOptions.variables,
