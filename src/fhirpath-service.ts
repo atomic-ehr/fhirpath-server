@@ -1,4 +1,10 @@
-import { evaluate, analyze, type EvaluateOptions, type EvaluationResult as AtomicEvaluationResult } from '@atomic-ehr/fhirpath';
+import {
+  evaluate,
+  analyze,
+  type EvaluationResult as AtomicEvaluationResult,
+  type AnalysisResult,
+  getVersion as getFhirpathVersion
+} from '@atomic-ehr/fhirpath';
 import type { FHIRVersionManager } from './version-manager.js';
 import type {
   Parameters,
@@ -6,18 +12,26 @@ import type {
   FhirResource,
   FHIRVersion,
   RouteContext,
-  JsonNode
+  JsonNode,
+  EvaluationParameterExtraction
 } from './types.js';
 import {
   parseJsonBody,
   validateParametersResource,
-  extractParameters,
+  extractEvaluationParameters,
   createFhirResponse,
   createErrorResponse,
   setParameterValue,
   stringifySafe,
   extractFhirVersion
 } from './utils.js';
+import './trace-hook.js';
+import {
+  beginTraceCollection,
+  endTraceCollection,
+  type TraceEntry
+} from './trace-collector.js';
+import serverPackageJson from '../package.json' assert { type: 'json' };
 
 export class FHIRPathService {
   constructor(private versionManager: FHIRVersionManager) { }
@@ -30,26 +44,13 @@ export class FHIRPathService {
     targetVersion: FHIRVersion
   ): Promise<Response> {
     try {
-      // Wait for the specific version to be initialized
+      const parsed = await this.parseRequest(ctx.request);
+      const validationError = this.validateExtraction(parsed.extraction);
+      if (validationError) {
+        return validationError;
+      }
+
       await this.versionManager.waitForVersion(targetVersion);
-
-      // Parse and validate request
-      const body = await parseJsonBody(ctx.request);
-
-      const inputParameters = validateParametersResource(body);
-
-      // Extract parameters
-      const params = extractParameters(inputParameters);
-
-      // Validate required parameters
-      if (!params.expression) {
-        return createErrorResponse('error', 'required', 'Missing required parameter: expression');
-      }
-
-      if (!params.resource) {
-        return createErrorResponse('error', 'required', 'Missing required parameter: resource');
-      }
-      // Get the model provider for this version
       const modelProvider = this.versionManager.getModelProvider(targetVersion);
       if (!modelProvider) {
         return createErrorResponse(
@@ -58,43 +59,11 @@ export class FHIRPathService {
           `FHIR version ${targetVersion} is not available`
         );
       }
-
-      // Handle context parameter - if provided, use it as input; otherwise use the full resource
-      let evaluationInput = params.resource;
-      if (params.context) {
-        // Pre-evaluate the context against the resource to get the starting point for evaluation
-        const contextResult = await evaluate(params.context as string, {
-          input: params.resource,
-          variables: this.extractVariables(params.variables),
-          modelProvider,
-        });
-        // Use the context evaluation result as input, or fall back to resource if context is empty
-        evaluationInput = contextResult && contextResult.length > 0 ? contextResult[0] : params.resource;
-      }
-
-      // Prepare evaluation options
-      const evaluationOptions: EvaluateOptions = {
-        input: evaluationInput,
-        variables: this.extractVariables(params.variables),
-        modelProvider,
-        includeMetadata: true,
-      };
-
-      // Evaluate the FHIRPath expression
-      const result = await evaluate(params.expression as string, evaluationOptions);
-      // Analyze the expression for AST
-      const analysisResult = await analyze(params.expression as string, {
-        variables: evaluationOptions.variables,
-        modelProvider
-      });
-
-      // Build response parameters
+      const execution = await this.runEvaluation(parsed.extraction, modelProvider);
       const responseParameters = this.buildResponseParameters(
-        inputParameters,
-        params.expression as string,
-        params.resource as FhirResource,
-        result,
-        analysisResult,
+        parsed.inputParameters,
+        parsed.extraction,
+        execution,
         targetVersion
       );
 
@@ -107,25 +76,39 @@ export class FHIRPathService {
     }
   }
 
-  /**
-   * Process FHIRPath request with auto-version detection
-   */
+
   async processAutoVersionRequest(ctx: RouteContext): Promise<Response> {
     try {
-      // Parse request to detect version
-      const body = await parseJsonBody(ctx.request);
-      const inputParameters = validateParametersResource(body);
-      const params = extractParameters(inputParameters);
+      const parsed = await this.parseRequest(ctx.request);
+      const validationError = this.validateExtraction(parsed.extraction);
+      if (validationError) {
+        return validationError;
+      }
 
-      // Try to detect FHIR version
-      const detectedVersion = extractFhirVersion(ctx.url.pathname, params.resource) ||
-        this.versionManager.detectVersionFromResource(params.resource) ||
-        'r4'; // Default to R4
+      const detectedVersion =
+        extractFhirVersion(ctx.url.pathname, parsed.extraction.resource) ||
+        this.versionManager.detectVersionFromResource(parsed.extraction.resource) ||
+        'r4';
 
-      console.log(`Auto-detected FHIR version: ${detectedVersion}`);
+      await this.versionManager.waitForVersion(detectedVersion);
+      const modelProvider = this.versionManager.getModelProvider(detectedVersion);
+      if (!modelProvider) {
+        return createErrorResponse(
+          'error',
+          'not-supported',
+          `FHIR version ${detectedVersion} is not available`
+        );
+      }
 
-      // Process with detected version using already parsed data
-      return this.processWithParsedData(inputParameters, params, detectedVersion);
+      const execution = await this.runEvaluation(parsed.extraction, modelProvider);
+      const responseParameters = this.buildResponseParameters(
+        parsed.inputParameters,
+        parsed.extraction,
+        execution,
+        detectedVersion
+      );
+
+      return createFhirResponse(responseParameters);
 
     } catch (error) {
       console.error('Auto-version detection error:', error);
@@ -134,95 +117,151 @@ export class FHIRPathService {
     }
   }
 
-  /**
-   * Process FHIRPath evaluation with already parsed data
-   */
-  private async processWithParsedData(
-    inputParameters: Parameters,
-    params: Record<string, any>,
-    targetVersion: FHIRVersion
-  ): Promise<Response> {
-    try {
-      // Wait for the specific version to be initialized
-      await this.versionManager.waitForVersion(targetVersion);
+  private async parseRequest(request: Request): Promise<{
+    inputParameters: Parameters;
+    extraction: EvaluationParameterExtraction;
+  }> {
+    const body = await parseJsonBody(request);
+    const inputParameters = validateParametersResource(body);
+    const extraction = extractEvaluationParameters(inputParameters);
+    return { inputParameters, extraction };
+  }
 
-      // Validate required parameters
-      if (!params.expression) {
-        return createErrorResponse('error', 'required', 'Missing required parameter: expression');
-      }
+  private validateExtraction(extraction: EvaluationParameterExtraction): Response | null {
+    if (!extraction.expression) {
+      return createErrorResponse('error', 'required', 'Missing required parameter: expression');
+    }
 
-      if (!params.resource) {
-        return createErrorResponse('error', 'required', 'Missing required parameter: resource');
-      }
+    if (!extraction.resourceDescriptor || extraction.resourceDescriptor.source === 'missing') {
+      return createErrorResponse('error', 'required', 'Missing required parameter: resource');
+    }
 
-      // Get the model provider for this version
-      const modelProvider = this.versionManager.getModelProvider(targetVersion);
-      if (!modelProvider) {
-        return createErrorResponse(
-          'error',
-          'not-supported',
-          `FHIR version ${targetVersion} is not available`
-        );
-      }
+    if (!extraction.resource) {
+      const reason = extraction.resourceDescriptor.parseError || 'Resource parameter could not be parsed';
+      return createErrorResponse('error', 'invalid', reason);
+    }
 
-      // Handle context parameter - if provided, use it as input; otherwise use the full resource
-      let evaluationInput = params.resource;
-      if (params.context) {
-        // Pre-evaluate the context against the resource to get the starting point for evaluation
-        const contextResult = await evaluate(params.context as string, {
-          input: params.resource,
-          variables: this.extractVariables(params.variables),
-          modelProvider
-        });
-        // Use the context evaluation result as input, or fall back to resource if context is empty
-        evaluationInput = contextResult && contextResult.length > 0 ? contextResult[0] : params.resource;
-      }
+    return null;
+  }
 
-      // Prepare evaluation options
-      const evaluationOptions: EvaluateOptions = {
-        input: evaluationInput,
-        variables: this.extractVariables(params.variables),
-        modelProvider
-      };
+  private async runEvaluation(
+    extraction: EvaluationParameterExtraction,
+    modelProvider: any
+  ): Promise<{
+    contexts: Array<{
+      index: number;
+      contextValue: unknown;
+      contextLabel?: string;
+      expressionResult: AtomicEvaluationResult['value'];
+      traces: TraceEntry[];
+    }>;
+    analysis: AnalysisResult;
+    variables: Record<string, any>;
+  }> {
+    const userVariables = this.extractVariables(extraction.variableParts);
+    const resource = extraction.resource!;
 
-      // Evaluate the FHIRPath expression
-      const result = await evaluate(params.expression as string, evaluationOptions);
-      // Analyze the expression for AST
-      const analysisResult = await analyze(params.expression as string, {
-        variables: evaluationOptions.variables,
-        modelProvider
+    const baseVariableSet: Record<string, any> = {
+      ...userVariables,
+      resource,
+      rootResource: resource
+    };
+
+    const analysis = await analyze(extraction.expression ?? '', {
+      variables: userVariables,
+      modelProvider
+    });
+
+    const contexts: Array<{
+      index: number;
+      contextValue: unknown;
+      contextLabel?: string;
+      expressionResult: AtomicEvaluationResult['value'];
+      traces: TraceEntry[];
+    }> = [];
+
+
+    if (extraction.contextExpression) {
+      const contextItems = await evaluate(extraction.contextExpression, {
+        input: resource,
+        variables: {
+          ...baseVariableSet,
+          context: resource
+        },
+        modelProvider,
+        includeMetadata: true
       });
 
-      // Build response parameters
-      const responseParameters = this.buildResponseParameters(
-        inputParameters,
-        params.expression as string,
-        params.resource as FhirResource,
-        result,
-        analysisResult,
-        targetVersion
-      );
+      for (const [index, contextItem] of contextItems.entries()) {
+        const contextValue = this.unwrapBoxedValue(contextItem);
+        beginTraceCollection();
+        try {
+          const expressionResult = await evaluate(extraction.expression!, {
+            input: contextValue,
+            variables: {
+              ...baseVariableSet,
+              context: contextValue
+            },
+            modelProvider,
+            includeMetadata: true
+          });
+          const traces = endTraceCollection();
+          contexts.push({
+            index,
+            contextValue,
+            contextLabel: this.deriveContextLabel(resource, extraction.contextExpression, index, contextItem),
+            expressionResult,
+            traces
+          });
+        } catch (error) {
+          endTraceCollection();
+          throw error;
+        }
+      }
+    } else {
+      beginTraceCollection();
+      try {
+        const expressionResult = await evaluate(extraction.expression ?? '', {
+          input: resource,
+          variables: {
+            ...baseVariableSet,
+            context: resource
+          },
+          modelProvider,
+          includeMetadata: true
+        });
 
-      return createFhirResponse(responseParameters);
-
-    } catch (error) {
-      console.error(`FHIRPath evaluation error (${targetVersion}):`, error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return createErrorResponse('error', 'exception', `Evaluation failed: ${errorMessage}`);
+        contexts.push({
+          index: 0,
+          contextValue: resource,
+          contextLabel: undefined,
+          expressionResult,
+          traces: endTraceCollection()
+        });
+      } catch (error) {
+        endTraceCollection();
+        throw error;
+      }
     }
+
+    return {
+      contexts,
+      analysis,
+      variables: userVariables
+    };
   }
 
   /**
    * Extract variables from parameters
    */
-  private extractVariables(variablesParam: any): Record<string, any> {
+  private extractVariables(variablesParam?: ParametersParameter[]): Record<string, any> {
     if (!variablesParam || !Array.isArray(variablesParam)) {
       return {};
     }
 
     const variables: Record<string, any> = {};
 
-    for (const varParam of variablesParam as ParametersParameter[]) {
+    for (const varParam of variablesParam) {
       let name = varParam.name;
 
       // Handle escaped variable names (from reference implementation)
@@ -269,6 +308,121 @@ export class FHIRPathService {
     }
 
     return variables;
+  }
+
+  private unwrapBoxedValue(item: AtomicEvaluationResult['value'][number] | unknown): unknown {
+    if (item && typeof item === 'object' && item !== null) {
+      const candidate = item as { value?: unknown };
+      if (Object.prototype.hasOwnProperty.call(candidate, 'value')) {
+        return candidate.value;
+      }
+    }
+    return item;
+  }
+
+  private deriveContextLabel(
+    resource: FhirResource,
+    contextExpression: string | undefined,
+    index: number,
+    contextItem?: AtomicEvaluationResult['value'][number]
+  ): string | undefined {
+    if (!contextExpression) {
+      return undefined;
+    }
+
+    const boxed = contextItem as unknown as {
+      typeInfo?: {
+        modelContext?: { path?: string };
+      };
+    } | undefined;
+
+    const modelPath = boxed?.typeInfo?.modelContext?.path;
+
+    if (modelPath && modelPath.length > 0) {
+      return modelPath.includes('[') ? modelPath : `${modelPath}[${index}]`;
+    }
+
+    const resourceType = resource.resourceType ?? 'Resource';
+    const normalized = contextExpression.trim();
+    if (!normalized) {
+      return `${resourceType}[${index}]`;
+    }
+    return `${resourceType}.${normalized}[${index}]`;
+  }
+
+  private cloneParameter(parameter: ParametersParameter): ParametersParameter {
+    return JSON.parse(JSON.stringify(parameter));
+  }
+
+  private getResultPartName(item: AtomicEvaluationResult['value'][number]): string {
+    const boxed = item as unknown as {
+      typeInfo?: {
+        name?: string;
+        type?: string;
+      };
+      value?: unknown;
+    } | undefined;
+    const typeInfo = boxed?.typeInfo;
+    if (typeInfo) {
+      if (typeof typeInfo.name === 'string' && typeInfo.name.length > 0) {
+        return typeInfo.name.toString().toLowerCase();
+      }
+      if (typeof typeInfo.type === 'string' && typeInfo.type.length > 0) {
+        return typeInfo.type.toString().toLowerCase();
+      }
+    }
+
+    const value = boxed?.value;
+    if (Array.isArray(value)) {
+      return 'collection';
+    }
+    if (value === null || value === undefined) {
+      return 'null';
+    }
+    return typeof value;
+  }
+
+  private createResultValuePart(item: AtomicEvaluationResult['value'][number]): ParametersParameter {
+    const part: ParametersParameter = {
+      name: this.getResultPartName(item)
+    };
+
+    setParameterValue(part, item, true);
+
+    if (!part.name) {
+      part.name = this.getResultPartName(item);
+    }
+
+    return part;
+  }
+
+  private createTracePart(trace: TraceEntry): ParametersParameter {
+    const traceParameter: ParametersParameter = {
+      name: 'trace',
+      valueString: trace.label,
+      part: []
+    };
+
+    for (const value of trace.values) {
+      if (traceParameter.part) {
+        traceParameter.part.push(this.createResultValuePart(value));
+      }
+    }
+
+    return traceParameter;
+  }
+
+  private buildEvaluatorMetadata(version: FHIRVersion): string {
+    const fhirpathVersion = getFhirpathVersion();
+    const serverVersion = typeof serverPackageJson.version === 'string'
+      ? serverPackageJson.version
+      : 'unknown';
+    const versionConfig = this.versionManager.getVersionConfig(version);
+    const packageDescriptor = versionConfig?.packages?.length
+      ? versionConfig.packages.map((pkg) => `${pkg.name}@${pkg.version}`).join(', ')
+      : `fhir-${version}`;
+
+    return `@atomic-ehr/fhirpath v${fhirpathVersion} (server v${serverVersion}) using ${packageDescriptor}`;
   }
 
   /**
@@ -410,86 +564,167 @@ export class FHIRPathService {
    * Build response Parameters resource
    */
   private buildResponseParameters(
-    inputParameters: Parameters,
-    expression: string,
-    resource: FhirResource,
-    evaluationResult: AtomicEvaluationResult['value'],
-    analysisResult: any,
+    _inputParameters: Parameters,
+    extraction: EvaluationParameterExtraction,
+    execution: {
+      contexts: Array<{
+        index: number;
+        contextValue: unknown;
+        contextLabel?: string;
+        expressionResult: AtomicEvaluationResult['value'];
+        traces: TraceEntry[];
+      }>;
+      analysis: AnalysisResult;
+      variables: Record<string, any>;
+    },
     version: FHIRVersion
   ): Parameters {
-    const versionConfig = this.versionManager.getVersionConfig(version);
-    const packageName = versionConfig?.packages[0]?.name || `fhir-${version}`;
-
-    const result: Parameters = {
-      resourceType: 'Parameters',
-      parameter: [
+    const parametersPart: ParametersParameter = {
+      name: 'parameters',
+      part: [
         {
-          name: 'parameters',
-          part: [
-            {
-              name: 'evaluator',
-              valueString: `@atomic-ehr/fhirpath (${version.toUpperCase()}) using ${packageName}`
-            },
-            {
-              name: 'expression',
-              valueString: expression
-            },
-            {
-              name: 'resource',
-              resource: resource
-            }
-          ]
-        },
-        {
-          name: 'result',
-          part: []
+          name: 'evaluator',
+          valueString: this.buildEvaluatorMetadata(version)
         }
       ]
     };
 
-    // Add AST information if available
-    if (analysisResult?.ast && result.parameter?.[0]?.part) {
-      // Transform the AST to UI-compatible format
-      const transformedAst = this.transformAstToJsonNode(analysisResult.ast);
+    const parameterParts = parametersPart.part!;
+
+    if (extraction.expressionParameter) {
+      parameterParts.push(this.cloneParameter(extraction.expressionParameter));
+    }
+
+    if (extraction.contextParameter) {
+      parameterParts.push(this.cloneParameter(extraction.contextParameter));
+    }
+
+    if (extraction.resourceDescriptor?.parameter) {
+      parameterParts.push(this.cloneParameter(extraction.resourceDescriptor.parameter));
+    } else if (extraction.resource) {
+      parameterParts.push({ name: 'resource', resource: extraction.resource });
+    }
+
+    if (extraction.variablesParameter) {
+      parameterParts.push(this.cloneParameter(extraction.variablesParameter));
+    }
+
+    for (const params of Object.values(extraction.additionalInputs)) {
+      for (const param of params) {
+        parameterParts.push(this.cloneParameter(param));
+      }
+    }
+
+    if (extraction.terminologyServer) {
+      parameterParts.push({
+        name: 'terminologyServerStatus',
+        valueString: 'terminologyServer parameter captured for future use'
+      });
+    }
+
+    // Attach AST visualization if available
+    if (execution.analysis?.ast) {
+      const transformedAst = this.transformAstToJsonNode(execution.analysis.ast);
       if (transformedAst) {
-        result.parameter[0].part.push({
+        parameterParts.push({
           name: 'parseDebugTree',
           valueString: stringifySafe(transformedAst, 2)
         });
       }
     }
 
-    // Add evaluation results
-    if (evaluationResult && evaluationResult.length > 0) {
-      for (const [index, item] of evaluationResult.entries()) {
-        const resultParam: ParametersParameter = {
-          name: `item${index}`
-        };
-
-        setParameterValue(resultParam, item, true);
-        if (result.parameter?.[1]?.part) {
-          result.parameter[1].part.push(resultParam);
-        }
-      }
-    }
-
-    // Add trace information if available
-    if (analysisResult?.diagnostics) {
-      const debugTrace: ParametersParameter = {
-        name: 'debug-trace',
-        part: []
+    const hasExpectedReturnType = parameterParts.some(part => part.name === 'expectedReturnType');
+    if (!hasExpectedReturnType && execution.analysis?.type) {
+      const analysisType = execution.analysis.type as unknown as {
+        name?: string;
+        type?: string;
       };
-
-      for (const diagnostic of analysisResult.diagnostics) {
-        debugTrace.part!.push({
-          name: 'diagnostic',
-          valueString: stringifySafe(diagnostic, 2)
+      const returnType = analysisType.name ?? analysisType.type;
+      if (returnType) {
+        parameterParts.push({
+          name: 'expectedReturnType',
+          valueString: String(returnType)
         });
       }
-
-      result.parameter!.push(debugTrace);
     }
 
-    return result;
+    if (execution.analysis?.diagnostics?.length) {
+      for (const diagnostic of execution.analysis.diagnostics) {
+        parameterParts.push({
+          name: 'analysis-diagnostic',
+          valueString: stringifySafe(diagnostic)
+        });
+      }
+    }
+
+    const responseParameters: Parameters = {
+      resourceType: 'Parameters',
+      parameter: [parametersPart]
+    };
+
+    // Add result parameters per context
+    if (execution.contexts.length > 0) {
+      for (const context of execution.contexts) {
+        const resultParameter: ParametersParameter = {
+          name: 'result',
+          part: []
+        };
+
+        if (context.contextLabel) {
+          resultParameter.valueString = context.contextLabel;
+        }
+
+        const valueParts = resultParameter.part!;
+        if (context.expressionResult.length === 0) {
+          valueParts.push({
+            name: 'empty',
+            valueBoolean: true
+          });
+        } else {
+          for (const item of context.expressionResult) {
+            valueParts.push(this.createResultValuePart(item));
+          }
+        }
+
+        if (context.traces.length > 0) {
+          for (const trace of context.traces) {
+            valueParts.push(this.createTracePart(trace));
+          }
+        }
+
+        if (responseParameters.parameter) {
+          responseParameters.parameter.push(resultParameter);
+        }
+      }
+    } else {
+      if (responseParameters.parameter) {
+        responseParameters.parameter.push({
+          name: 'result',
+          part: [
+            {
+              name: 'empty',
+              valueBoolean: true
+            }
+          ]
+        });
+      }
+    }
+
+    // Debug trace placeholder to surface analyzer diagnostics until full tracing is implemented
+    if (execution.analysis?.diagnostics?.length) {
+      const debugTrace: ParametersParameter = {
+        name: 'debug-trace',
+        part: execution.analysis.diagnostics.map((diagnostic: any) => ({
+          name: 'diagnostic',
+          valueString: stringifySafe(diagnostic)
+        }))
+      };
+
+      if (responseParameters.parameter) {
+        responseParameters.parameter.push(debugTrace);
+      }
+    }
+
+    return responseParameters;
   }
 }

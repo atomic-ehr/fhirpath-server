@@ -24,7 +24,7 @@
   "author": "Atomic EHR Team",
   "license": "MIT",
   "dependencies": {
-    "@atomic-ehr/fhirpath": "0.0.3-canary.1cc4151.20250923125128"
+    "@atomic-ehr/fhirpath": "0.0.3-canary.4ee6618.20250926085031"
   },
   "devDependencies": {
     "@types/bun": "latest"

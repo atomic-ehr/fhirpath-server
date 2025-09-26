@@ -1,9 +1,138 @@
 import type { EvaluationResult as AtomicEvaluationResult } from '@atomic-ehr/fhirpath';
 import type {
+  EvaluationParameterExtraction,
+  FhirResource,
   OperationOutcome,
   Parameters,
   ParametersParameter,
+  ResourceDescriptor,
+  ResourceInputSource
 } from './types.js';
+
+export const RESOURCE_PATH_EXTENSION_URL = 'http://fhir.forms-lab.com/StructureDefinition/resource-path';
+export const JSON_VALUE_EXTENSION_URL = 'http://fhir.forms-lab.com/StructureDefinition/json-value';
+export const XML_VALUE_EXTENSION_URL = 'http://fhir.forms-lab.com/StructureDefinition/xml-value';
+
+const PARAMETER_VALUE_KEYS: Array<keyof ParametersParameter> = [
+  'valueString',
+  'valueBoolean',
+  'valueInteger',
+  'valueDecimal',
+  'valueDate',
+  'valueTime',
+  'valueDateTime',
+  'valueInstant',
+  'valueCode',
+  'valueBase64Binary',
+  'valueCanonical',
+  'valueId',
+  'valueMarkdown',
+  'valueOid',
+  'valuePositiveInt',
+  'valueUnsignedInt',
+  'valueUri',
+  'valueUrl',
+  'valueUuid',
+  'valueQuantity',
+  'valueHumanName',
+  'valueContactPoint',
+  'valueAddress',
+  'valueIdentifier',
+  'valueCodeableConcept',
+  'valueCoding',
+  'valuePeriod',
+  'valueRange',
+  'valueRatio',
+  'valueReference',
+  'valueAttachment',
+  'valueAge',
+  'valueCount',
+  'valueDistance',
+  'valueDuration',
+  'valueMoney',
+  'valueAnnotation',
+  'valueSampledData',
+  'valueSignature',
+  'valueTiming',
+  'valueContactDetail',
+  'valueContributor',
+  'valueDataRequirement',
+  'valueExpression',
+  'valueParameterDefinition',
+  'valueRelatedArtifact',
+  'valueTriggerDefinition',
+  'valueUsageContext',
+  'valueDosage',
+  'valueMeta',
+  'resource',
+  'part',
+  'extension'
+];
+
+function getParameterPrimaryValue(param: ParametersParameter): any {
+  for (const key of PARAMETER_VALUE_KEYS) {
+    const value = param[key];
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function pushAdditionalInput(
+  additional: Record<string, ParametersParameter[]>,
+  name: string,
+  parameter: ParametersParameter
+): void {
+  if (!additional[name]) {
+    additional[name] = [];
+  }
+  additional[name].push(parameter);
+}
+
+function parseResourceParameter(parameter: ParametersParameter): {
+  resource?: FhirResource;
+  descriptor: ResourceDescriptor;
+} {
+  const descriptor: ResourceDescriptor = {
+    source: 'missing',
+    parameter
+  };
+
+  if (parameter.resource) {
+    descriptor.source = 'inline-resource';
+    return { resource: parameter.resource, descriptor };
+  }
+
+  const extensions = parameter.extension ?? [];
+  const jsonExt = extensions.find((ext) => ext.url === JSON_VALUE_EXTENSION_URL);
+  const jsonValue = typeof jsonExt?.valueString === 'string' ? jsonExt.valueString : undefined;
+  if (jsonValue) {
+    descriptor.source = 'json-extension';
+    descriptor.contentType = 'json';
+    descriptor.serializedContent = jsonValue;
+
+    try {
+      const parsed = JSON.parse(jsonValue);
+      return { resource: parsed, descriptor };
+    } catch (error) {
+      descriptor.parseError = error instanceof Error ? error.message : 'Invalid JSON payload';
+      return { descriptor };
+    }
+  }
+
+  const xmlExt = extensions.find((ext) => ext.url === XML_VALUE_EXTENSION_URL);
+  const xmlValue = typeof xmlExt?.valueString === 'string' ? xmlExt.valueString : undefined;
+  if (xmlValue) {
+    descriptor.source = 'xml-extension';
+    descriptor.contentType = 'xml';
+    descriptor.serializedContent = xmlValue;
+    descriptor.parseError = 'XML resource inputs are not supported yet';
+    return { descriptor };
+  }
+
+  return { descriptor };
+}
 
 /**
  * Create a FHIR OperationOutcome for error responses
@@ -36,67 +165,100 @@ export function extractParameters(parameters: Parameters): Record<string, any> {
   if (!parameters.parameter) return extracted;
 
   for (const param of parameters.parameter) {
-    const value =
-      // Primitive types
-      param.valueString ||
-      param.valueBoolean ||
-      param.valueInteger ||
-      param.valueDecimal ||
-      param.valueDate ||
-      param.valueTime ||
-      param.valueDateTime ||
-      param.valueInstant ||
-      param.valueCode ||
-      param.valueBase64Binary ||
-      param.valueCanonical ||
-      param.valueId ||
-      param.valueMarkdown ||
-      param.valueOid ||
-      param.valuePositiveInt ||
-      param.valueUnsignedInt ||
-      param.valueUri ||
-      param.valueUrl ||
-      param.valueUuid ||
-      // Complex types
-      param.valueQuantity ||
-      param.valueHumanName ||
-      param.valueContactPoint ||
-      param.valueAddress ||
-      param.valueIdentifier ||
-      param.valueCodeableConcept ||
-      param.valueCoding ||
-      param.valuePeriod ||
-      param.valueRange ||
-      param.valueRatio ||
-      param.valueReference ||
-      param.valueAttachment ||
-      param.valueAge ||
-      param.valueCount ||
-      param.valueDistance ||
-      param.valueDuration ||
-      param.valueMoney ||
-      param.valueAnnotation ||
-      param.valueSampledData ||
-      param.valueSignature ||
-      param.valueTiming ||
-      // Metadata types
-      param.valueContactDetail ||
-      param.valueContributor ||
-      param.valueDataRequirement ||
-      param.valueExpression ||
-      param.valueParameterDefinition ||
-      param.valueRelatedArtifact ||
-      param.valueTriggerDefinition ||
-      param.valueUsageContext ||
-      // Additional types
-      param.valueDosage ||
-      param.valueMeta ||
-      // Structural elements
-      param.resource ||
-      param.part ||
-      param.extension;
+    const value = getParameterPrimaryValue(param);
+    if (value !== undefined) {
+      extracted[param.name] = value;
+    }
+  }
 
-    extracted[param.name] = value;
+  return extracted;
+}
+
+export function extractEvaluationParameters(parameters: Parameters): EvaluationParameterExtraction {
+  const extracted: EvaluationParameterExtraction = {
+    additionalInputs: {}
+  };
+
+  if (!parameters.parameter) {
+    return extracted;
+  }
+
+  for (const parameter of parameters.parameter) {
+    switch (parameter.name) {
+      case 'expression': {
+        extracted.expressionParameter = parameter;
+        if (typeof parameter.valueString === 'string') {
+          extracted.expression = parameter.valueString;
+        } else {
+          const value = getParameterPrimaryValue(parameter);
+          if (typeof value === 'string') {
+            extracted.expression = value;
+          }
+        }
+        break;
+      }
+      case 'context': {
+        extracted.contextParameter = parameter;
+        if (typeof parameter.valueString === 'string') {
+          extracted.contextExpression = parameter.valueString;
+        } else {
+          const value = getParameterPrimaryValue(parameter);
+          if (typeof value === 'string') {
+            extracted.contextExpression = value;
+          }
+        }
+        break;
+      }
+      case 'resource': {
+        const { resource, descriptor } = parseResourceParameter(parameter);
+        extracted.resourceDescriptor = descriptor;
+        if (resource) {
+          extracted.resource = resource;
+        }
+        break;
+      }
+      case 'variables': {
+        extracted.variablesParameter = parameter;
+        if (Array.isArray(parameter.part)) {
+          extracted.variableParts = parameter.part;
+        } else {
+          extracted.variableParts = [];
+        }
+        break;
+      }
+      case 'terminologyserver': {
+        const value = getParameterPrimaryValue(parameter);
+        if (typeof value === 'string') {
+          extracted.terminologyServer = value;
+        }
+        pushAdditionalInput(extracted.additionalInputs, parameter.name, parameter);
+        break;
+      }
+      case 'expectedReturnType': {
+        const value = getParameterPrimaryValue(parameter);
+        if (typeof value === 'string') {
+          extracted.expectedReturnType = value;
+        }
+        pushAdditionalInput(extracted.additionalInputs, parameter.name, parameter);
+        break;
+      }
+      case 'validate': {
+        if (typeof parameter.valueBoolean === 'boolean') {
+          extracted.validate = parameter.valueBoolean;
+        } else {
+          const value = getParameterPrimaryValue(parameter);
+          if (typeof value === 'string') {
+            extracted.validate = value.toLowerCase() === 'true';
+          }
+        }
+        pushAdditionalInput(extracted.additionalInputs, parameter.name, parameter);
+        break;
+      }
+      default: {
+        pushAdditionalInput(extracted.additionalInputs, parameter.name, parameter);
+        break;
+      }
+    }
   }
 
   return extracted;
@@ -105,12 +267,33 @@ export function extractParameters(parameters: Parameters): Record<string, any> {
 /**
  * Create CORS headers for responses
  */
-export function createCorsHeaders(): Record<string, string> {
+const DEFAULT_CORS_ORIGIN = 'https://fhirpath-lab.com';
+const ALLOWED_CORS_ORIGINS = [
+  DEFAULT_CORS_ORIGIN,
+  'https://dev.fhirpath-lab.com',
+  'http://localhost:3000'
+];
+
+function resolveAllowedOrigin(origin?: string | null): string {
+  if (origin && ALLOWED_CORS_ORIGINS.includes(origin)) {
+    return origin;
+  }
+
+  if (origin && origin.startsWith('http://localhost')) {
+    return origin;
+  }
+
+  return DEFAULT_CORS_ORIGIN;
+}
+
+export function createCorsHeaders(origin?: string | null): Record<string, string> {
+  const allowedOrigin = resolveAllowedOrigin(origin);
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Max-Age': '86400'
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin'
   };
 }
 
@@ -119,8 +302,7 @@ export function createCorsHeaders(): Record<string, string> {
  */
 export function createFhirHeaders(): Record<string, string> {
   return {
-    'Content-Type': 'application/fhir+json; charset=utf-8',
-    ...createCorsHeaders()
+    'Content-Type': 'application/fhir+json; charset=utf-8'
   };
 }
 
@@ -136,7 +318,6 @@ export function createJsonResponse(
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      ...createCorsHeaders(),
       ...headers
     }
   });
@@ -222,7 +403,7 @@ export function setParameterValue(
     resourcePath = (item.typeInfo?.modelContext as any)?.path as string;
     param.extension = [
       {
-        url: "http://fhir.forms-lab.com/StructureDefinition/resource-path",
+        url: RESOURCE_PATH_EXTENSION_URL,
         valueString: resourcePath
       }
     ]
@@ -345,7 +526,7 @@ export function setParameterValue(
       param.valueString = item.value;
       break;
     case 'boolean':
-      param.valueBoolean = Boolean(item.value);
+      param.valueBoolean = item.value;
       break;
     case 'integer':
       param.valueInteger = parseInt(item.value);
@@ -404,7 +585,7 @@ export function setParameterValue(
         // Store complex data as JSON extension
         param.extension = param.extension || [];
         param.extension.push({
-          url: 'http://fhir.forms-lab.com/StructureDefinition/json-value',
+          url: JSON_VALUE_EXTENSION_URL,
           valueString: JSON.stringify(item.value, null, 2)
         });
       } else if (resourcePath) {

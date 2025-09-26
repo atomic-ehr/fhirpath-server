@@ -18,7 +18,10 @@ export class Router {
     if (!this.routes.has(method)) {
       this.routes.set(method, new Map());
     }
-    this.routes.get(method)!.set(path, handler);
+    const existed = this.routes.get(method)
+    if (existed) {
+      this.routes.get(method)?.set(path, handler);
+    }
   }
 
   /**
@@ -47,6 +50,7 @@ export class Router {
    */
   async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const origin = request.headers.get('Origin');
 
     // Log the request
     logRequest(request, url);
@@ -55,14 +59,13 @@ export class Router {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
-        headers: createCorsHeaders()
+        headers: createCorsHeaders(origin)
       });
     }
 
     // Find matching route
     const methodRoutes = this.routes.get(request.method);
     if (!methodRoutes) {
-       console.log('hwhw')
       return createErrorResponse('error', 'not-found', `Method ${request.method} not allowed`, 405);
     }
 
@@ -93,15 +96,36 @@ export class Router {
       };
 
       const response = await handler(context);
-      return response;
+      const headers = new Headers(response.headers);
+      const corsHeaders = createCorsHeaders(origin);
+      for (const [key, value] of Object.entries(corsHeaders)) {
+        headers.set(key, value);
+      }
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      });
     } catch (error) {
       console.error('Route handler error:', error);
-      return createErrorResponse(
+      const errorResponse = createErrorResponse(
         'error',
         'exception',
         `Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         500
       );
+      const headers = new Headers(errorResponse.headers);
+      const corsHeaders = createCorsHeaders(origin);
+      for (const [key, value] of Object.entries(corsHeaders)) {
+        headers.set(key, value);
+      }
+
+      return new Response(errorResponse.body, {
+        status: errorResponse.status,
+        statusText: errorResponse.statusText,
+        headers
+      });
     }
   }
 

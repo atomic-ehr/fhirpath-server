@@ -107,6 +107,35 @@ export interface Extension {
   extension?: Extension[];
 }
 
+export type ResourceInputSource =
+  | 'inline-resource'
+  | 'json-extension'
+  | 'xml-extension'
+  | 'missing';
+
+export interface ResourceDescriptor {
+  source: ResourceInputSource;
+  parameter?: ParametersParameter;
+  serializedContent?: string;
+  contentType?: 'json' | 'xml';
+  parseError?: string;
+}
+
+export interface EvaluationParameterExtraction {
+  expression?: string;
+  expressionParameter?: ParametersParameter;
+  contextExpression?: string;
+  contextParameter?: ParametersParameter;
+  resource?: FhirResource;
+  resourceDescriptor?: ResourceDescriptor;
+  variablesParameter?: ParametersParameter;
+  variableParts?: ParametersParameter[];
+  terminologyServer?: string;
+  expectedReturnType?: string;
+  validate?: boolean;
+  additionalInputs: Record<string, ParametersParameter[]>;
+}
+
 export interface Quantity {
   value?: number;
   unit?: string;
