@@ -675,15 +675,8 @@ export class FHIRPathService {
         }
 
         const valueParts = resultParameter.part!;
-        if (context.expressionResult.length === 0) {
-          valueParts.push({
-            name: 'empty',
-            valueBoolean: true
-          });
-        } else {
-          for (const item of context.expressionResult) {
-            valueParts.push(this.createResultValuePart(item));
-          }
+        for (const item of context.expressionResult) {
+          valueParts.push(this.createResultValuePart(item));
         }
 
         if (context.traces.length > 0) {
@@ -697,15 +690,11 @@ export class FHIRPathService {
         }
       }
     } else {
+      // No contexts - add empty result
       if (responseParameters.parameter) {
         responseParameters.parameter.push({
           name: 'result',
-          part: [
-            {
-              name: 'empty',
-              valueBoolean: true
-            }
-          ]
+          part: []
         });
       }
     }
