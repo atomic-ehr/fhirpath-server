@@ -428,15 +428,19 @@ export function setParameterValue(
 	item: AtomicEvaluationResult["value"][number],
 	fullData: boolean = true,
 ): void {
-	if (!item) return;
+	if (item === null || item === undefined) return;
 
-	const dataType = item.typeInfo?.name || item.typeInfo?.type || "Any";
+	const isBoxed = item && typeof item === "object" && "typeInfo" in item;
+
+	const actualValue = isBoxed ? item.value : item;
+	const typeInfo = isBoxed ? item.typeInfo : undefined;
+
+	const dataType = typeInfo?.name || typeInfo?.type || "Any";
 	let resourcePath: string | undefined = undefined;
 
 	// Add resource path extension if available
-
-	if ((item.typeInfo?.modelContext as any)?.path) {
-		resourcePath = (item.typeInfo?.modelContext as any)?.path as string;
+	if ((typeInfo?.modelContext as any)?.path) {
+		resourcePath = (typeInfo?.modelContext as any)?.path as string;
 		param.extension = [
 			{
 				url: RESOURCE_PATH_EXTENSION_URL,
@@ -445,18 +449,23 @@ export function setParameterValue(
 		];
 	}
 
-	if (!item.typeInfo?.name && !item.typeInfo?.type) {
-		if (!Number.isNaN(item.value)) {
-			if (Number.isInteger(item.value)) {
-				param.valueInteger = item.value;
+	if (!typeInfo?.name && !typeInfo?.type) {
+		if (typeof actualValue === "boolean") {
+			param.valueBoolean = actualValue;
+			return;
+		}
+
+		if (typeof actualValue === "number" && !Number.isNaN(actualValue)) {
+			if (Number.isInteger(actualValue)) {
+				param.valueInteger = actualValue;
 			} else {
-				param.valueDecimal = item.value;
+				param.valueDecimal = actualValue;
 			}
 			return;
 		}
 
-		if (typeof item.value === "string") {
-			param.valueString = item.value;
+		if (typeof actualValue === "string") {
+			param.valueString = actualValue;
 			return;
 		}
 	}
@@ -464,156 +473,156 @@ export function setParameterValue(
 	switch (dataType.toLowerCase()) {
 		// Complex types
 		case "humanname":
-			param.valueHumanName = item.value;
+			param.valueHumanName = actualValue;
 			break;
 		case "contactpoint":
-			param.valueContactPoint = item.value;
+			param.valueContactPoint = actualValue;
 			break;
 		case "address":
-			param.valueAddress = item.value;
+			param.valueAddress = actualValue;
 			break;
 		case "quantity":
-			param.valueQuantity = item.value;
+			param.valueQuantity = actualValue;
 			break;
 		case "age":
-			param.valueAge = item.value;
+			param.valueAge = actualValue;
 			break;
 		case "count":
-			param.valueCount = item.value;
+			param.valueCount = actualValue;
 			break;
 		case "distance":
-			param.valueDistance = item.value;
+			param.valueDistance = actualValue;
 			break;
 		case "duration":
-			param.valueDuration = item.value;
+			param.valueDuration = actualValue;
 			break;
 		case "money":
-			param.valueMoney = item.value;
+			param.valueMoney = actualValue;
 			break;
 		case "codeableconcept":
-			param.valueCodeableConcept = item.value;
+			param.valueCodeableConcept = actualValue;
 			break;
 		case "coding":
-			param.valueCoding = item.value;
+			param.valueCoding = actualValue;
 			break;
 		case "identifier":
-			param.valueIdentifier = item.value;
+			param.valueIdentifier = actualValue;
 			break;
 		case "period":
-			param.valuePeriod = item.value;
+			param.valuePeriod = actualValue;
 			break;
 		case "range":
-			param.valueRange = item.value;
+			param.valueRange = actualValue;
 			break;
 		case "ratio":
-			param.valueRatio = item.value;
+			param.valueRatio = actualValue;
 			break;
 		case "reference":
-			param.valueReference = item.value;
+			param.valueReference = actualValue;
 			break;
 		case "attachment":
-			param.valueAttachment = item.value;
+			param.valueAttachment = actualValue;
 			break;
 		case "annotation":
-			param.valueAnnotation = item.value;
+			param.valueAnnotation = actualValue;
 			break;
 		case "sampleddata":
-			param.valueSampledData = item.value;
+			param.valueSampledData = actualValue;
 			break;
 		case "signature":
-			param.valueSignature = item.value;
+			param.valueSignature = actualValue;
 			break;
 		case "timing":
-			param.valueTiming = item.value;
+			param.valueTiming = actualValue;
 			break;
 		case "contactdetail":
-			param.valueContactDetail = item.value;
+			param.valueContactDetail = actualValue;
 			break;
 		case "contributor":
-			param.valueContributor = item.value;
+			param.valueContributor = actualValue;
 			break;
 		case "datarequirement":
-			param.valueDataRequirement = item.value;
+			param.valueDataRequirement = actualValue;
 			break;
 		case "expression":
-			param.valueExpression = item.value;
+			param.valueExpression = actualValue;
 			break;
 		case "parameterdefinition":
-			param.valueParameterDefinition = item.value;
+			param.valueParameterDefinition = actualValue;
 			break;
 		case "relatedartifact":
-			param.valueRelatedArtifact = item.value;
+			param.valueRelatedArtifact = actualValue;
 			break;
 		case "triggerdefinition":
-			param.valueTriggerDefinition = item.value;
+			param.valueTriggerDefinition = actualValue;
 			break;
 		case "usagecontext":
-			param.valueUsageContext = item.value;
+			param.valueUsageContext = actualValue;
 			break;
 		case "dosage":
-			param.valueDosage = item.value;
+			param.valueDosage = actualValue;
 			break;
 		case "meta":
-			param.valueMeta = item.value;
+			param.valueMeta = actualValue;
 			break;
 		// Primitive types
 		case "string":
 		case "system.string":
-			param.valueString = item.value;
+			param.valueString = actualValue;
 			break;
 		case "boolean":
-			param.valueBoolean = item.value;
+			param.valueBoolean = actualValue;
 			break;
 		case "integer":
-			param.valueInteger = parseInt(item.value);
+			param.valueInteger = parseInt(actualValue);
 			break;
 		case "decimal":
-			param.valueDecimal = parseFloat(item.value);
+			param.valueDecimal = parseFloat(actualValue);
 			break;
 		case "date":
-			param.valueDate = item.value;
+			param.valueDate = actualValue;
 			break;
 		case "datetime":
-			param.valueDateTime = item.value;
+			param.valueDateTime = actualValue;
 			break;
 		case "time":
-			param.valueTime = item.value;
+			param.valueTime = actualValue;
 			break;
 		case "instant":
-			param.valueInstant = item.value;
+			param.valueInstant = actualValue;
 			break;
 		case "code":
-			param.valueCode = item.value;
+			param.valueCode = actualValue;
 			break;
 		case "base64binary":
-			param.valueBase64Binary = item.value;
+			param.valueBase64Binary = actualValue;
 			break;
 		case "canonical":
-			param.valueCanonical = item.value;
+			param.valueCanonical = actualValue;
 			break;
 		case "id":
-			param.valueId = item.value;
+			param.valueId = actualValue;
 			break;
 		case "markdown":
-			param.valueMarkdown = item.value;
+			param.valueMarkdown = actualValue;
 			break;
 		case "oid":
-			param.valueOid = item.value;
+			param.valueOid = actualValue;
 			break;
 		case "positiveint":
-			param.valuePositiveInt = parseInt(item.value);
+			param.valuePositiveInt = parseInt(actualValue);
 			break;
 		case "unsignedint":
-			param.valueUnsignedInt = parseInt(item.value);
+			param.valueUnsignedInt = parseInt(actualValue);
 			break;
 		case "uri":
-			param.valueUri = item.value;
+			param.valueUri = actualValue;
 			break;
 		case "url":
-			param.valueUrl = item.value;
+			param.valueUrl = actualValue;
 			break;
 		case "uuid":
-			param.valueUuid = item.value;
+			param.valueUuid = actualValue;
 			break;
 
 		default:
@@ -622,7 +631,7 @@ export function setParameterValue(
 				param.extension = param.extension || [];
 				param.extension.push({
 					url: JSON_VALUE_EXTENSION_URL,
-					valueString: JSON.stringify(item.value, null, 2),
+					valueString: JSON.stringify(actualValue, null, 2),
 				});
 			} else if (resourcePath) {
 				param.name = "resource-path";
