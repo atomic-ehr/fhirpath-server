@@ -1,10 +1,11 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "fhirpath-server",
       "dependencies": {
-        "@atomic-ehr/fhirpath": "0.0.3-canary.4ee6618.20250926085031",
+        "@atomic-ehr/fhirpath": "0.0.5",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -17,7 +18,7 @@
   "packages": {
     "@atomic-ehr/fhir-canonical-manager": ["@atomic-ehr/fhir-canonical-manager@0.0.11", "", { "peerDependencies": { "typescript": "^5" }, "bin": { "fcm": "dist/cli/index.js" } }, "sha512-BaAYcvHJWQ3uvWr77lZ20XWZ3EtxEbuEhPPpiwlpEWwrCUAnx+xYf4BZicIE7tHe3uBG5uP1XLk6ZQ30edLf5A=="],
 
-    "@atomic-ehr/fhirpath": ["@atomic-ehr/fhirpath@0.0.3-canary.4ee6618.20250926085031", "", { "dependencies": { "@atomic-ehr/fhir-canonical-manager": "^0.0.11", "@atomic-ehr/fhirschema": "^0.0.2", "@atomic-ehr/ucum": "^0.2.5", "fast-xml-parser": "^5.2.5" }, "peerDependencies": { "typescript": "^5" } }, "sha512-2CNfBOKBmTkRRSgr1kmgIrzgOu6O8pgzSn1WwEgm5YHLIBwUl1NrF8pQYvpHXCb+KCrML6Cy7jekkv7fH2MHkA=="],
+    "@atomic-ehr/fhirpath": ["@atomic-ehr/fhirpath@0.0.5", "", { "dependencies": { "@atomic-ehr/fhir-canonical-manager": "^0.0.11", "@atomic-ehr/fhirschema": "^0.0.2", "@atomic-ehr/ucum": "^0.2.5", "fast-xml-parser": "^5.2.5" }, "peerDependencies": { "typescript": "^5" } }, "sha512-H7px0lpuazIioXTiHspM3wcTxRE8Fobx92tEPexbaxOpo7qzLgPoQP9hQUqTZMXmfF4kUf0nMs48/eX+jDLcYQ=="],
 
     "@atomic-ehr/fhirschema": ["@atomic-ehr/fhirschema@0.0.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-OA4CVjTUEdw43Efg5I5rj95je4GC3lRiLM/kUqadcK3Po24vnINUsB8YdOP/F3ffdUYKQcJ+z09sWQVeAC2z/A=="],
 

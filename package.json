@@ -1,35 +1,35 @@
 {
-  "name": "fhirpath-server",
-  "version": "1.0.0",
-  "description": "Multi-version FHIRPath server using Bun runtime with atomic-ehr/fhirpath library",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
-    "build": "bun build src/index.ts --target bun --outdir dist",
-    "test": "bun test"
-  },
-  "keywords": [
-    "fhir",
-    "fhirpath",
-    "bun",
-    "server",
-    "r4",
-    "r5",
-    "r6"
-  ],
-  "author": "Atomic EHR Team",
-  "license": "MIT",
-  "dependencies": {
-    "@atomic-ehr/fhirpath": "0.0.3-canary.4ee6618.20250926085031"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  }
+	"name": "fhirpath-server",
+	"version": "1.0.0",
+	"description": "Multi-version FHIRPath server using Bun runtime with atomic-ehr/fhirpath library",
+	"main": "src/index.ts",
+	"module": "src/index.ts",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"start": "bun run src/index.ts",
+		"dev": "bun --watch run src/index.ts",
+		"build": "bun build src/index.ts --target bun --outdir dist",
+		"test": "bun test"
+	},
+	"keywords": [
+		"fhir",
+		"fhirpath",
+		"bun",
+		"server",
+		"r4",
+		"r5",
+		"r6"
+	],
+	"author": "Atomic EHR Team",
+	"license": "MIT",
+	"dependencies": {
+		"@atomic-ehr/fhirpath": "0.0.5"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	}
 }
